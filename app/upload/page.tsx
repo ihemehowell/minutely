@@ -7,8 +7,11 @@ import UploadZone from "@/components/upload/upload-zone"
 import ProcessingScreen from "@/components/upload/processing-screen"
 import ResultsDashboard from "@/components/results/results-dashboard"
 import Navbar from "@/components/layout/Navbar"
-import { saveAnalysis } from "@/lib/storage"
-import type { MeetingAnalysis } from "@/types/analysis"
+import type { MeetingIntelligence } from "@/types/analysis"
+
+// The /api/analyze route injects savedId into the JSON response.
+// It is NOT part of the domain type — we strip it before storing state.
+type AnalyzeResponse = MeetingIntelligence & { savedId?: string | null }
 
 type Step = "upload" | "processing" | "results"
 
@@ -17,23 +20,24 @@ export default function UploadPage() {
   const router = useRouter()
   const [step, setStep] = useState<Step>("upload")
   const [transcript, setTranscript] = useState("")
-  const [analysis, setAnalysis] = useState<MeetingAnalysis | null>(null)
+  const [analysis, setAnalysis] = useState<MeetingIntelligence | null>(null)
 
   const handleAnalyze = (text: string) => {
     setTranscript(text)
     setStep("processing")
   }
 
-  const handleProcessingComplete = async (data: MeetingAnalysis) => {
-    if (user?.id) {
-      const id = await saveAnalysis(data, user.id)
-      if (id) {
-        router.push(`/results/${id}`)
-        return
-      }
+  const handleProcessingComplete = (raw: AnalyzeResponse) => {
+    const { savedId, ...intelligence } = raw
+
+    // If the route already persisted and returned an id, navigate directly
+    if (savedId) {
+      router.push(`/results/${savedId}`)
+      return
     }
-    // Not logged in — show results in-session only
-    setAnalysis(data)
+
+    // Anonymous or save failed — show results in-session
+    setAnalysis(intelligence)
     setStep("results")
   }
 
@@ -63,7 +67,10 @@ export default function UploadPage() {
 
         {step === "processing" && (
           <div className="mx-auto max-w-lg">
-            <ProcessingScreen transcript={transcript} onComplete={handleProcessingComplete} />
+            <ProcessingScreen
+              transcript={transcript}
+              onComplete={handleProcessingComplete}
+            />
           </div>
         )}
 

@@ -1,85 +1,81 @@
+/**
+ * POST /api/analysis  — legacy single-agent fallback route
+ */
 import { NextRequest, NextResponse } from "next/server"
+import { AI_BASE_URL, AI_FAST_MODEL, getAIApiKey, getAIHeaders } from "@/lib/ai-config"
 
-const SYSTEM_PROMPT = `You are a meeting intelligence assistant. Analyze the transcript and return ONLY valid JSON matching this exact shape — no markdown, no explanation, no backticks, nothing else:
+const SYSTEM_PROMPT = `You are a meeting intelligence assistant.
+Analyze the transcript and return ONLY a JSON object. No markdown. No preamble.
 
+Required shape:
 {
-  "title": "string (meeting title, inferred from context)",
-  "summary": "string (2-3 sentence summary)",
+  "title": "short meeting title",
+  "summary": "2-3 sentence summary",
   "processingTime": 0,
   "actionItems": [
-    {
-      "id": "string (e.g. 'ai-1', 'ai-2')",
-      "task": "string",
-      "assignee": "string (full name or 'Unassigned')",
-      "due": "string (e.g. 'Friday', 'End of week', 'Next Monday')",
-      "priority": "High" | "Medium" | "Low"
-    }
+    { "id": "ai-1", "task": "task", "assignee": "Full Name", "due": "Friday", "priority": "High" }
   ],
-  "decisions": ["string", "string"],
-  "participants": [
-    { "name": "string", "role": "string (infer from context)" }
-  ],
+  "decisions": ["decision"],
+  "participants": [{ "name": "Full Name", "role": "role" }],
   "transcript": ""
-}`
+}
+priority: "High" | "Medium" | "Low"`
+
+function safeParse(raw: string) {
+  let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim()
+  cleaned = cleaned.replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/m, "").trim()
+  const start = cleaned.indexOf("{")
+  if (start > 0) cleaned = cleaned.slice(start)
+  return JSON.parse(cleaned)
+}
 
 export async function POST(req: NextRequest) {
   try {
     const { transcript } = await req.json()
-
     if (!transcript?.trim()) {
-      return NextResponse.json(
-        { error: "Transcript is required" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "Transcript is required" }, { status: 400 })
     }
+
+    const apiKey = getAIApiKey()
+    if (!apiKey) return NextResponse.json({ error: "AI API key missing" }, { status: 500 })
 
     const start = Date.now()
 
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: `Analyze this meeting transcript:\n\n${transcript}`,
-            },
-          ],
-        }),
-      }
-    )
+    const response = await fetch(AI_BASE_URL, {
+      method: "POST",
+      headers: getAIHeaders(apiKey),
+      body: JSON.stringify({
+        model: AI_FAST_MODEL,
+        temperature: 0.2,
+        max_tokens: 3000,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: `Analyze this meeting transcript:\n\n${transcript}` },
+        ],
+      }),
+    })
 
     if (!response.ok) {
       const error = await response.text()
-      console.error("Groq API error:", error)
-      return NextResponse.json(
-        { error: "Groq API request failed" },
-        { status: response.status }
-      )
+      return NextResponse.json({ error: "AI request failed", details: error }, { status: response.status })
     }
 
     const json = await response.json()
-    const raw = json.choices?.[0]?.message?.content ?? ""
-    const elapsed = parseFloat(((Date.now() - start) / 1000).toFixed(1))
+    const raw = json?.choices?.[0]?.message?.content
+    if (!raw) return NextResponse.json({ error: "Empty AI response" }, { status: 500 })
 
-    const data = JSON.parse(raw)
-    data.processingTime = elapsed
+    let data
+    try {
+      data = safeParse(raw)
+    } catch {
+      return NextResponse.json({ error: "AI returned invalid JSON", raw }, { status: 500 })
+    }
+
+    data.processingTime = parseFloat(((Date.now() - start) / 1000).toFixed(1))
     data.transcript = transcript
-
     return NextResponse.json(data)
   } catch (err) {
-    console.error("Analyze route error:", err)
-    return NextResponse.json(
-      { error: "Failed to process transcript" },
-      { status: 500 }
-    )
+    console.error("Legacy analysis route error:", err)
+    return NextResponse.json({ error: "Failed to process transcript" }, { status: 500 })
   }
 }

@@ -7,7 +7,7 @@ import ProcessingScreen from "@/components/upload/processing-screen"
 import ResultsDashboard from "@/components/results/results-dashboard"
 import Navbar from "@/components/layout/Navbar"
 import { saveAnalysis } from "@/lib/storage"
-import type { MeetingAnalysis } from "@/types/analysis"
+import type { MeetingIntelligence, MeetingAnalysis } from "@/types/analysis"
 
 type Step = "upload" | "processing" | "results"
 
@@ -15,14 +15,14 @@ export default function DemoPage() {
   const { user } = useUser()
   const [step, setStep] = useState<Step>("upload")
   const [transcript, setTranscript] = useState("")
-  const [analysis, setAnalysis] = useState<MeetingAnalysis | null>(null)
+  const [analysis, setAnalysis] = useState<MeetingIntelligence | null>(null)
 
   const handleAnalyze = (text: string) => {
     setTranscript(text)
     setStep("processing")
   }
 
-  const handleProcessingComplete = async (data: MeetingAnalysis) => {
+  const handleProcessingComplete = async (data: MeetingIntelligence) => {
     await saveAnalysis(data, user?.id)
     setAnalysis(data)
     setStep("results")

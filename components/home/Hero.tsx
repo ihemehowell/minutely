@@ -44,8 +44,7 @@ export default function Hero() {
           {/* Description */}
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
             Upload transcripts or voice notes and let Minutely extract
-            summaries, action items, deadlines, decisions, and owners in
-            under 10 seconds.
+            summaries, action items, deadlines, decisions, and owners.
           </p>
 
           {/* CTA */}

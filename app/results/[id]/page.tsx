@@ -1,9 +1,9 @@
 import { notFound, redirect } from "next/navigation"
 import { auth } from "@clerk/nextjs/server"
-import { adminSupabase } from "@/lib/supabase/admin"
+import { createAdminSupabaseClient } from "@/lib/supabase/admin"
 import Navbar from "@/components/layout/Navbar"
 import ResultsDashboard from "@/components/results/results-dashboard"
-import type { MeetingAnalysis } from "@/types/analysis"
+import type { MeetingIntelligence } from "@/types/analysis"
 
 interface Props {
   params: Promise<{ id: string }>
@@ -15,6 +15,7 @@ export default async function ResultsPage({ params }: Props) {
 
   if (!userId) redirect("/upload")
 
+  const adminSupabase = createAdminSupabaseClient()
   const { data, error } = await adminSupabase
     .from("meetings")
     .select("*")
@@ -24,7 +25,7 @@ export default async function ResultsPage({ params }: Props) {
 
   if (error || !data) notFound()
 
-  const analysis: MeetingAnalysis = {
+  const analysis: MeetingIntelligence = {
     title: data.title,
     summary: data.summary,
     processingTime: data.processing_time,
@@ -32,6 +33,13 @@ export default async function ResultsPage({ params }: Props) {
     decisions: data.decisions ?? [],
     participants: data.participants ?? [],
     transcript: data.transcript ?? "",
+    blockers: data.blockers ?? [],
+    sprintPlan: data.sprint_plan ?? [],
+    workflow: data.workflow ?? [],
+    actionPlan: data.action_plan ?? [],
+    followUps: data.follow_ups ?? [],
+    agentVersion: data.agent_version ?? "1.0.0",
+    analysisMode: data.analysis_mode ?? "legacy",
   }
 
   return (
@@ -42,7 +50,7 @@ export default async function ResultsPage({ params }: Props) {
       </div>
       <Navbar />
       <div className="pt-24">
-        <ResultsDashboard analysis={analysis} />
+        <ResultsDashboard analysis={analysis} meetingId={id} />
       </div>
     </main>
   )

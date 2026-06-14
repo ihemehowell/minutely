@@ -42,7 +42,6 @@ export default function Navbar() {
           {[
             { label: "Features", href: "#features" },
             { label: "How it works", href: "#how" },
-            { label: "Pricing", href: "#pricing" },
           ].map((item) => (
             <Link
               key={item.label}
@@ -56,17 +55,20 @@ export default function Navbar() {
 
         {/* Actions */}
 <div className="flex items-center gap-2">
-  <ThemeToggle />
+
 
   
 
-  <AuthButton />
+ 
 
   <Link href="/upload">
     <Button className="rounded-xl px-5 shadow-lg shadow-primary/20 transition-all hover:scale-[1.02]">
-      Upload Meeting
+      Upload
     </Button>
-  </Link>
+  </Link>  
+ <AuthButton />
+ 
+  <ThemeToggle />
 </div>
       </div>
     </motion.header>
@@ -79,19 +81,22 @@ function AuthButton() {
   if (isSignedIn) {
     return (
       <>
-        <Link href="/history">
-          <Button variant="ghost" className="hidden items-center gap-2 rounded-xl sm:inline-flex">
-            <History className="h-4 w-4" />
-            History
-          </Button>
-        </Link>
+       
+
         <UserButton
           appearance={{
             elements: {
               avatarBox: "h-8 w-8 rounded-xl",
             },
           }}
-        />
+        /> 
+        
+        <Link href="/history">
+          <Button variant="ghost" className="hidden items-center gap-2 rounded-xl sm:inline-flex">
+            <History className="h-4 w-4" />
+            History
+          </Button>
+        </Link>
       </>
     )
   }

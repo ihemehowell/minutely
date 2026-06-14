@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { useUser } from "@clerk/nextjs"
-import { getHistory, deleteAnalysis } from "@/lib/storage"
 import type { HistoryEntry } from "@/lib/storage"
 import { Clock3, Trash2, Loader2, ArrowRight } from "lucide-react"
 import Link from "next/link"
@@ -14,26 +13,17 @@ export default function HistoryList() {
 
   useEffect(() => {
     if (!isLoaded) return
-    if (!user?.id) {
-      return
-    }
+    if (!user?.id) { setLoading(false); return }
 
-    async function loadHistory() {
-      try {
-        const data = await getHistory(user?.id)
-        setEntries(data)
-      } catch (err) {
-        console.error("History load error:", err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadHistory()
+    fetch("/api/history")
+      .then((r) => r.json())
+      .then((d) => setEntries(d.entries ?? []))
+      .catch((err) => console.error("History load error:", err))
+      .finally(() => setLoading(false))
   }, [isLoaded, user?.id])
 
   const handleDelete = async (id: string) => {
-    await deleteAnalysis(id)
+    await fetch(`/api/history/${id}`, { method: "DELETE" })
     setEntries((e) => e.filter((x) => x.id !== id))
   }
 
@@ -45,7 +35,6 @@ export default function HistoryList() {
     )
   }
 
-  // Not logged in
   if (!user?.id) {
     return (
       <div className="rounded-3xl border bg-card/70 p-12 text-center backdrop-blur">
@@ -53,10 +42,7 @@ export default function HistoryList() {
         <p className="mt-2 text-sm text-muted-foreground">
           Your analyzed meetings are saved to your account.
         </p>
-        <Link
-          href="/upload"
-          className="mt-6 inline-block text-sm text-primary hover:underline"
-        >
+        <Link href="/upload" className="mt-6 inline-block text-sm text-primary hover:underline">
           Analyze a meeting →
         </Link>
       </div>
@@ -67,10 +53,7 @@ export default function HistoryList() {
     return (
       <div className="rounded-3xl border bg-card/70 p-12 text-center backdrop-blur">
         <p className="text-muted-foreground">No meetings analyzed yet.</p>
-        <Link
-          href="/upload"
-          className="mt-4 inline-block text-sm text-primary hover:underline"
-        >
+        <Link href="/upload" className="mt-4 inline-block text-sm text-primary hover:underline">
           Analyze your first meeting →
         </Link>
       </div>
@@ -86,20 +69,22 @@ export default function HistoryList() {
         >
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold truncate">{entry.title}</h3>
-            <p className="mt-1 text-sm text-muted-foreground line-clamp-1">
-              {entry.summary}
-            </p>
-            <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground line-clamp-1">{entry.summary}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Clock3 className="h-3 w-3" />
                 {new Date(entry.savedAt).toLocaleDateString("en-GB", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
+                  day: "numeric", month: "short", year: "numeric",
                 })}
               </span>
               <span>{entry.actionItems.length} tasks</span>
               <span>{entry.participants.length} participants</span>
+              {entry.blockers?.length > 0 && (
+                <span className="text-orange-400">{entry.blockers.length} blockers</span>
+              )}
+              {entry.sprintPlan?.length > 0 && (
+                <span>{entry.sprintPlan.length} sprints</span>
+              )}
             </div>
           </div>
 
