@@ -61,15 +61,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to save token" }, { status: 500 })
   }
 
-  // Also store the root page ID in env-like fashion (scoped to user via DB)
-  if (rootPageId) {
-    await admin
-      .from("user_integrations")
-      .update({ raw: { rootPageId } })
-      .eq("user_id", userId)
-      .eq("provider", "notion")
-  }
-
   return NextResponse.json({ ok: true, connected: true })
 }
 
