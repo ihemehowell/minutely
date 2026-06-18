@@ -1,14 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   Sparkles,
   RotateCcw,
-  Terminal,
-  CheckCircle2,
-  Loader2,
-  XCircle,
-  Clock3,
   Activity,
   ArrowRight,
 } from "lucide-react"
@@ -21,21 +16,12 @@ import ExportButton from "@/components/results/export-button"
 import BlockerPanel from "@/components/results/blocker-panel"
 import SprintBoard from "./sprint-board"
 import ActionPlanPanel from "./action-plan"
+import RuntimeTab from "./runtimetab"
 import Link from "next/link"
 
 interface Props {
   analysis: MeetingAnalysis | MeetingIntelligence
   meetingId?: string | null
-}
-
-type ToolExecutionStatus = "queued" | "running" | "success" | "failed" | "dry-run"
-
-interface RuntimeExecution {
-  id: string
-  tool: string
-  message: string
-  status: ToolExecutionStatus
-  timestamp: string
 }
 
 function isIntelligence(a: MeetingAnalysis | MeetingIntelligence): a is MeetingIntelligence {
@@ -60,31 +46,37 @@ type TabKey =
   | "Decisions"
   | "Transcript"
 
+/** Total number of agents RuntimeTab will render — keeps the badge in sync. */
+const AGENT_COUNT = 6
+
 export default function ResultsDashboard({ analysis: initial, meetingId }: Props) {
   const [analysis, setAnalysis] = useState<MeetingAnalysis | MeetingIntelligence>(initial)
   const [activeTab, setActiveTab] = useState<TabKey>("Summary")
+  const intel = isIntelligence(analysis) ? analysis : null
 
-  const [runtimeExecutions, setRuntimeExecutions] = useState<RuntimeExecution[]>([
-    {
-      id: crypto.randomUUID(),
-      tool: "analysis",
-      message: "Transcript analyzed successfully",
-      status: "success",
-      timestamp: new Date().toISOString(),
-    },
-    {
-      id: crypto.randomUUID(),
-      tool: "workflow",
-      message: "Workflow graph generated",
-      status: "success",
-      timestamp: new Date().toISOString(),
-    },
-  ])
+  const runtimeStats = useMemo(() => {
+    if (!intel) return { success: 1, running: 0, failed: 0, partial: 0 }
+
+    const agentResults = [
+      "success" as const,
+      "success" as const,
+      intel.sprintPlan?.length ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+      intel.workflow?.length ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+      intel.actionPlan?.length ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+      intel.followUps?.length ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+    ] as const
+
+    return {
+      success: agentResults.filter((s) => s === "success").length,
+      running: 0,
+      failed: 0,
+      partial: agentResults.filter((s) => s === "partial").length,
+    }
+  }, [intel])
 
   if (!analysis) return null
 
   const { title, summary, processingTime, decisions, participants, transcript } = analysis
-  const intel = isIntelligence(analysis) ? analysis : null
   const isFullMode = intel?.analysisMode === "full"
 
   const hasActionPlan = Array.isArray(intel?.actionPlan) && (isFullMode || intel!.actionPlan.length > 0)
@@ -93,50 +85,29 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
   const hasWorkflow   = Array.isArray(intel?.workflow)   && (isFullMode || intel!.workflow.length > 0)
   const hasFollowUps  = Array.isArray(intel?.followUps)  && (isFullMode || intel!.followUps.length > 0)
 
-  useEffect(() => {
-    if (!intel) return
-    const generated: RuntimeExecution[] = []
+  /**
+   * Runtime stats derived from real intel data — mirrors the logic in RuntimeTab's
+   * deriveEvents() so the header bar stays consistent with the tab content.
+   */
+  // const runtimeStats = useMemo(() => {
+  //   if (!intel) return { success: 1, running: 0, failed: 0, partial: 0 }
 
-    if (intel.blockers?.length) {
-      generated.push({
-        id: crypto.randomUUID(),
-        tool: "slack",
-        message: `Detected ${intel.blockers.length} blocker(s) — Slack escalation ready`,
-        status: "success",
-        timestamp: new Date().toISOString(),
-      })
-    }
-    if (intel.followUps?.length) {
-      generated.push({
-        id: crypto.randomUUID(),
-        tool: "email",
-        message: `${intel.followUps.length} follow-up drafts generated`,
-        status: "success",
-        timestamp: new Date().toISOString(),
-      })
-    }
-    if (intel.sprintPlan?.length) {
-      generated.push({
-        id: crypto.randomUUID(),
-        tool: "calendar",
-        message: "Sprint coordination events prepared",
-        status: "running",
-        timestamp: new Date().toISOString(),
-      })
-    }
+  //   const agentResults = [
+  //     "success" as const,                                                          // analysis agent always succeeds
+  //     "success" as const,                                                          // blocker agent always returns something
+  //     intel.sprintPlan?.length ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+  //     intel.workflow?.length   ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+  //     intel.actionPlan?.length ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+  //     intel.followUps?.length  ? "success" : intel.analysisMode === "partial" ? "partial" : "success",
+  //   ] as const
 
-    setRuntimeExecutions((prev) => {
-      const seen = new Set(prev.map((e) => e.message))
-      return [...prev, ...generated.filter((e) => !seen.has(e.message))]
-    })
-  }, [intel])
-
-  const runtimeStats = useMemo(() => ({
-    success: runtimeExecutions.filter((e) => e.status === "success").length,
-    running: runtimeExecutions.filter((e) => e.status === "running").length,
-    failed:  runtimeExecutions.filter((e) => e.status === "failed").length,
-    dryRun:  runtimeExecutions.filter((e) => e.status === "dry-run").length,
-  }), [runtimeExecutions])
+  //   return {
+  //     success: agentResults.filter((s) => s === "success").length,
+  //     running: 0,
+  //     failed: 0,
+  //     partial: agentResults.filter((s) => s === "partial").length,
+  //   }
+  // }, [intel])
 
   const tabs: Array<{ key: TabKey; label: string; visible: boolean; count?: number }> = [
     { key: "Summary",      label: "Summary",      visible: true },
@@ -144,9 +115,9 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
     { key: "Action Plan",  label: "Action Plan",  visible: hasActionPlan,  count: intel?.actionPlan?.length },
     { key: "Sprint Plan",  label: "Sprint Plan",  visible: hasSprintPlan,  count: intel?.sprintPlan?.length },
     { key: "Blockers",     label: "Blockers",     visible: hasBlockers,    count: intel?.blockers?.length },
-    { key: "Workflow",     label: "Workflow",      visible: hasWorkflow,    count: intel?.workflow?.length },
+    { key: "Workflow",     label: "Workflow",     visible: hasWorkflow,    count: intel?.workflow?.length },
     { key: "Follow-ups",   label: "Follow-ups",   visible: hasFollowUps,   count: intel?.followUps?.length },
-    { key: "Runtime",      label: "Runtime",      visible: true,           count: runtimeExecutions.length },
+    { key: "Runtime",      label: "Runtime",      visible: true,           count: AGENT_COUNT },
     { key: "Decisions",    label: "Decisions",    visible: decisions.length > 0, count: decisions.length },
     { key: "Transcript",   label: "Transcript",   visible: true },
   ]
@@ -161,24 +132,26 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
   const renderTabContent = () => {
     switch (currentTab) {
       case "Runtime":
-        return <RuntimePanel executions={runtimeExecutions} stats={runtimeStats} />
+        // RuntimeTab requires MeetingIntelligence; fall back to a message for basic analyses
+        return intel
+          ? <RuntimeTab analysis={intel} />
+          : <EmptyState message="Runtime breakdown is only available for full analyses." />
 
       case "Summary":
         return (
           <div className="space-y-6">
-            {/* Primary stats */}
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
               <StatCard label="Action Items" value={analysis.actionItems.length} />
               <StatCard label="Decisions"    value={decisions.length} />
               <StatCard label="Participants" value={participants.length} />
-              <StatCard label="Runtime Events" value={runtimeExecutions.length} accent />
+              <StatCard label="Agents"       value={AGENT_COUNT} accent />
             </div>
 
             {intel && (
               <div className="grid gap-3 grid-cols-3">
                 <StatCard label="Sprints"    value={intel.sprintPlan?.length ?? 0} accent />
-                <StatCard label="Blockers"   value={intel.blockers?.length ?? 0} accent danger={!!intel.blockers?.length} />
-                <StatCard label="Follow-ups" value={intel.followUps?.length ?? 0} accent />
+                <StatCard label="Blockers"   value={intel.blockers?.length ?? 0}   accent danger={!!intel.blockers?.length} />
+                <StatCard label="Follow-ups" value={intel.followUps?.length ?? 0}  accent />
               </div>
             )}
 
@@ -201,16 +174,24 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
         )
 
       case "Action Plan":
-        return intel ? <ActionPlanPanel actionPlan={intel.actionPlan} /> : <EmptyState message="Action plan not available." />
+        return intel
+          ? <ActionPlanPanel actionPlan={intel.actionPlan} />
+          : <EmptyState message="Action plan not available." />
 
       case "Sprint Plan":
-        return intel ? <SprintBoard sprintPlan={intel.sprintPlan} actionItems={analysis.actionItems} /> : <EmptyState message="Sprint plan not available." />
+        return intel
+          ? <SprintBoard sprintPlan={intel.sprintPlan} actionItems={analysis.actionItems} />
+          : <EmptyState message="Sprint plan not available." />
 
       case "Blockers":
-        return intel ? <BlockerPanel blockers={intel.blockers} /> : <EmptyState message="Blocker detection not available." />
+        return intel
+          ? <BlockerPanel blockers={intel.blockers} />
+          : <EmptyState message="Blocker detection not available." />
 
       case "Workflow":
-        return intel ? <WorkflowPanel workflow={intel.workflow} /> : <EmptyState message="Workflow not available." />
+        return intel
+          ? <WorkflowPanel workflow={intel.workflow} />
+          : <EmptyState message="Workflow not available." />
 
       case "Follow-ups":
         return intel
@@ -259,10 +240,10 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
         {/* Pills + actions row */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2">
-            <Pill label="Time"   value={`${processingTime}s`} />
-            <Pill label="Tasks"  value={String(analysis.actionItems.length)} />
-            <Pill label="People" value={String(participants.length)} />
-            <Pill label="Events" value={String(runtimeExecutions.length)} />
+            <Pill label="Time"    value={`${processingTime}s`} />
+            <Pill label="Tasks"   value={String(analysis.actionItems.length)} />
+            <Pill label="People"  value={String(participants.length)} />
+            <Pill label="Agents"  value={String(AGENT_COUNT)} />
             {blockerCount > 0 && (
               <div className="rounded-full border border-orange-500/20 bg-orange-500/5 px-4 py-2 text-sm">
                 <span className="text-orange-400 font-medium">
@@ -274,14 +255,13 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
 
           <div className="flex items-center gap-3">
             <ExportButton analysis={analysis} />
-
             <Link
-        href="/integrations"
-        className="flex items-center gap-2 rounded-2xl border bg-card/50 px-5 py-2.5 text-sm backdrop-blur transition-all hover:bg-card"
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          Integrations
-        </Link>
+              href="/integrations"
+              className="flex items-center gap-2 rounded-2xl border bg-card/50 px-5 py-2.5 text-sm backdrop-blur transition-all hover:bg-card"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Integrations
+            </Link>
             <Link
               href="/upload"
               className="flex items-center gap-2 rounded-2xl border bg-card/50 px-5 py-2.5 text-sm backdrop-blur transition-all hover:bg-card"
@@ -300,12 +280,11 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
               Runtime
             </span>
           </div>
-          <div className="w-px h-4 bg-border hidden sm:block " />
+          <div className="w-px h-4 bg-border hidden sm:block" />
           <div className="flex flex-wrap gap-3">
             <RuntimeMetric label="Success" value={runtimeStats.success} />
-            <RuntimeMetric label="Running" value={runtimeStats.running} />
+            <RuntimeMetric label="Partial"  value={runtimeStats.partial} />
             <RuntimeMetric label="Failed"  value={runtimeStats.failed} />
-            <RuntimeMetric label="Dry Run" value={runtimeStats.dryRun} />
           </div>
         </div>
       </div>
@@ -318,11 +297,11 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
             <p className="text-xs uppercase tracking-[0.3em] text-primary font-medium">Workspace</p>
             <span className="text-sm text-muted-foreground flex items-center gap-2">
               choose a view
-               <ArrowRight className="w-4 h-4 "/>
-               </span>
+              <ArrowRight className="w-4 h-4" />
+            </span>
           </div>
 
-          {/* Tab nav — horizontally scrollable on mobile */}
+          {/* Tab nav */}
           <nav
             className="flex gap-1.5 overflow-x-auto rounded-2xl border border-white/10 bg-muted/30 p-1.5 backdrop-blur-xl scrollbar-none"
             role="tablist"
@@ -357,7 +336,7 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
 
           {/* Tab content panel */}
           <section className="relative overflow-hidden rounded-2xl border border-white/10 bg-card/70 p-6 backdrop-blur-xl">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+            <div className="absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-primary/40 to-transparent" />
             {renderTabContent()}
           </section>
         </div>
@@ -375,80 +354,12 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
   )
 }
 
-// ── Runtime panel ──────────────────────────────────────────────────────────────
-
-function RuntimePanel({
-  executions,
-  stats,
-}: {
-  executions: RuntimeExecution[]
-  stats: { success: number; running: number; failed: number; dryRun: number }
-}) {
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <Terminal className="h-5 w-5 text-primary" />
-        <h2 className="text-base font-semibold">Agent Runtime</h2>
-      </div>
-
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
-        <RuntimeMetric label="Success" value={stats.success} />
-        <RuntimeMetric label="Running" value={stats.running} />
-        <RuntimeMetric label="Failed"  value={stats.failed} />
-        <RuntimeMetric label="Dry Run" value={stats.dryRun} />
-      </div>
-
-      <div className="space-y-2">
-        {executions.map((execution) => (
-          <RuntimeEventCard key={execution.id} execution={execution} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function RuntimeEventCard({ execution }: { execution: RuntimeExecution }) {
-  const icon =
-    execution.status === "success" ? <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" /> :
-    execution.status === "failed"  ? <XCircle      className="h-4 w-4 text-red-400 shrink-0" /> :
-    execution.status === "running" ? <Loader2      className="h-4 w-4 animate-spin text-primary shrink-0" /> :
-                                     <Clock3       className="h-4 w-4 text-yellow-400 shrink-0" />
-
-  const statusColour =
-    execution.status === "success" ? "text-emerald-400" :
-    execution.status === "failed"  ? "text-red-400" :
-    execution.status === "running" ? "text-primary" :
-                                     "text-yellow-400"
-
-  return (
-    <div className="rounded-xl border border-white/10 bg-background/40 px-4 py-3">
-      <div className="flex items-center gap-3">
-        {icon}
-        <p className="flex-1 text-sm">{execution.message}</p>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`text-[10px] font-medium uppercase tracking-wider ${statusColour}`}>
-            {execution.status}
-          </span>
-          <span className="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-            {execution.tool}
-          </span>
-        </div>
-      </div>
-      <p className="mt-1.5 pl-7 text-[11px] text-muted-foreground tabular-nums">
-        {new Date(execution.timestamp).toLocaleTimeString()}
-      </p>
-    </div>
-  )
-}
-
 // ── Inline runtime metric (header bar) ────────────────────────────────────────
-// Compact horizontal layout for the header bar; vertical layout for the Runtime tab.
 
 function RuntimeMetric({ label, value }: { label: string; value: number }) {
   const accent =
     label === "Failed"  ? "text-red-400" :
-    label === "Running" ? "text-primary" :
-    label === "Dry Run" ? "text-yellow-400" :
+    label === "Partial" ? "text-yellow-400" :
                           "text-emerald-400"
 
   return (

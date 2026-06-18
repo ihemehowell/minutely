@@ -25,6 +25,7 @@
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin"
 import { AI_BASE_URL, AI_PRIMARY_MODEL, getAIApiKey, getAIHeaders } from "@/lib/ai-config"
+import type { ChatCompletionTool } from "openai/resources/chat/completions"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -397,7 +398,7 @@ export async function executeTool(
 export async function callLLMWithTools(
   systemPrompt: string,
   userContent:  string,
-  tools:        typeof MINUTELY_TOOLS,
+  tools: readonly ChatCompletionTool[],
   userId:       string,
   maxRounds =   4
 ): Promise<AgentWithToolsResult> {

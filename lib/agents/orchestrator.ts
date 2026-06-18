@@ -19,7 +19,6 @@ import type {
 } from "@/types/analysis"
 import { AI_BASE_URL, AI_PRIMARY_MODEL, getAIApiKey, getAIHeaders } from "@/lib/ai-config"
 import type { MemoryBlock } from "@/app/api/memory/route"
-import type { MemoryBlock } from "@/app/api/memory/route"
 
 const AGENT_VERSION = "1.0.0"
 
@@ -28,7 +27,8 @@ const AGENT_VERSION = "1.0.0"
 async function callLLM(
   systemPrompt: string,
   userContent: string,
-  timeoutMs = 50_000
+  timeoutMs = 25_000,
+  maxTokens = 1500
 ): Promise<string> {
   const apiKey = getAIApiKey()
   if (!apiKey) throw new Error("AI API key is not set")
@@ -44,7 +44,7 @@ async function callLLM(
       body: JSON.stringify({
         model: AI_PRIMARY_MODEL,
         temperature: 0.1,
-        max_tokens: 4096,
+        max_tokens: maxTokens,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
@@ -161,7 +161,12 @@ async function runAnalysisAgent(transcript: string, memory?: MemoryBlock): Promi
     ? `\n\nPRIOR MEETING CONTEXT (${memory.meetingCount} previous meetings):\n${memory.condensedSummary}\nKnown participants: ${memory.participantHistory.join(", ")}\nOpen tasks from prior meetings: ${memory.openTasks.slice(0, 5).join("; ") || "none"}`
     : ""
 
-  const raw = await callLLM(ANALYSIS_PROMPT, `Analyze this transcript:${memoryContext}\n\n${transcript}`)
+  const raw = await callLLM(
+    ANALYSIS_PROMPT,
+    `Analyze this transcript:${memoryContext}\n\n${transcript}`,
+    30_000,
+    2000
+  )
   const parsed = extractJSON(raw) as AnalysisAgentOutput
   if (!parsed.title || !Array.isArray(parsed.actionItems)) {
     throw new Error("Analysis agent returned incomplete data")
@@ -193,8 +198,10 @@ severity: "Critical" | "High" | "Medium"
 Return { "blockers": [] } if nothing is blocked.`
 
 async function runBlockerAgent(transcript: string, actionItems: ActionItem[]): Promise<BlockerAgentOutput> {
-  const context = `Action items:\n${actionItems.map((a) => `- [${a.id}] ${a.task} (${a.assignee})`).join("\n")}\n\nTranscript:\n\n${transcript}`
-  const raw = await callLLM(BLOCKER_PROMPT, context)
+  // Secondary agents only need a short transcript excerpt for context
+  const shortTranscript = transcript.slice(0, 3000)
+  const context = `Action items:\n${actionItems.map((a) => `- [${a.id}] ${a.task} (${a.assignee})`).join("\n")}\n\nTranscript:\n\n${shortTranscript}`
+  const raw = await callLLM(BLOCKER_PROMPT, context, 25_000, 800)
   const parsed = extractJSON(raw) as BlockerAgentOutput
   if (!Array.isArray(parsed.blockers)) parsed.blockers = []
   return parsed
@@ -230,7 +237,7 @@ async function runSprintAgent(actionItems: ActionItem[]): Promise<SprintAgentOut
   const itemList = actionItems
     .map((a) => `[${a.id}] "${a.task}" — ${a.assignee} | Priority: ${a.priority} | Points: ${a.storyPoints ?? 3} | Deps: ${(a.dependencies ?? []).join(", ") || "none"}`)
     .join("\n")
-  const raw = await callLLM(SPRINT_PROMPT, `Plan sprints for these action items:\n\n${itemList}`)
+  const raw = await callLLM(SPRINT_PROMPT, `Plan sprints for these action items:\n\n${itemList}`, 25_000, 1000)
   const parsed = extractJSON(raw) as SprintAgentOutput
   if (!Array.isArray(parsed.sprintPlan)) parsed.sprintPlan = []
   return parsed
@@ -265,7 +272,7 @@ async function runWorkflowAgent(actionItems: ActionItem[]): Promise<WorkflowAgen
   const itemList = actionItems
     .map((a) => `[${a.id}] "${a.task}" — ${a.assignee} | Points: ${a.storyPoints ?? 3} | Deps: ${(a.dependencies ?? []).join(", ") || "none"}`)
     .join("\n")
-  const raw = await callLLM(WORKFLOW_PROMPT, `Build workflow for:\n\n${itemList}`)
+  const raw = await callLLM(WORKFLOW_PROMPT, `Build workflow for:\n\n${itemList}`, 25_000, 1000)
   const parsed = extractJSON(raw) as WorkflowAgentOutput
   if (!Array.isArray(parsed.workflow)) parsed.workflow = []
   return parsed
@@ -296,12 +303,15 @@ priority: "High" | "Medium" | "Low"
 status: "Immediate" | "Short-term" | "Follow-up"`
 
 async function runActionPlanAgent(transcript: string, actionItems: ActionItem[], decisions: string[]): Promise<ActionPlanAgentOutput> {
+  const shortTranscript = transcript.slice(0, 3000)
   const itemList = actionItems
     .map((a) => `[${a.id}] "${a.task}" — ${a.assignee} | Due: ${a.due} | Priority: ${a.priority}`)
     .join("\n")
   const raw = await callLLM(
     ACTION_PLAN_PROMPT,
-    `Decisions:\n${decisions.map((d) => `- ${d}`).join("\n")}\n\nAction items:\n${itemList}\n\nTranscript:\n\n${transcript}`
+    `Decisions:\n${decisions.map((d) => `- ${d}`).join("\n")}\n\nAction items:\n${itemList}\n\nTranscript:\n\n${shortTranscript}`,
+    25_000,
+    800
   )
   const parsed = extractJSON(raw) as ActionPlanAgentOutput
   if (!Array.isArray(parsed.actionPlan)) parsed.actionPlan = []
@@ -334,13 +344,19 @@ urgency: "High" | "Medium" | "Low"
 Only create follow-ups for people with assigned tasks.`
 
 async function runFollowUpAgent(transcript: string, actionItems: ActionItem[], participants: { name: string; role: string }[]): Promise<FollowUpAgentOutput> {
+  const shortTranscript = transcript.slice(0, 2000)
   const peopleWithTasks = participants
     .map((p) => {
       const myTasks = actionItems.filter((a) => a.assignee.toLowerCase() === p.name.toLowerCase())
       return `${p.name} (${p.role}): ${myTasks.map((t) => `[${t.id}] ${t.task} — due ${t.due}`).join(" | ") || "no tasks"}`
     })
     .join("\n")
-  const raw = await callLLM(FOLLOWUP_PROMPT, `Participants and tasks:\n${peopleWithTasks}\n\nTranscript:\n\n${transcript}`)
+  const raw = await callLLM(
+    FOLLOWUP_PROMPT,
+    `Participants and tasks:\n${peopleWithTasks}\n\nTranscript:\n\n${shortTranscript}`,
+    25_000,
+    1000
+  )
   const parsed = extractJSON(raw) as FollowUpAgentOutput
   if (!Array.isArray(parsed.followUps)) parsed.followUps = []
   return parsed

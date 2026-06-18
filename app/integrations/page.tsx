@@ -10,13 +10,15 @@
  *   - Email (Resend): shows whether the app admin has set up sending
  */
 
-import { useEffect, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { Suspense, useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   CalendarDays, FileText, MessageSquare, Mail,
   CheckCircle2, XCircle, Loader2, ExternalLink, Link2Off,
+  ArrowLeftCircle,
 } from "lucide-react"
 import Navbar from "@/components/layout/Navbar"
+import Link from "next/link"
 
 interface IntegrationStatus {
   google: boolean
@@ -37,14 +39,18 @@ function StatusBadge({ connected }: { connected: boolean }) {
   )
 }
 
-export default function IntegrationsPage() {
+// ── Inner component that uses useSearchParams ──────────────────────────────────
+// Must be wrapped in <Suspense> at the page level for Next.js static export.
+
+function IntegrationsContent() {
+  const router = useRouter()
   const searchParams = useSearchParams()
-  const [status, setStatus]       = useState<IntegrationStatus | null>(null)
-  const [loading, setLoading]     = useState(true)
-  const [notionToken, setNotionToken] = useState("")
-  const [notionPage, setNotionPage]   = useState("")
-  const [savingNotion, setSavingNotion] = useState(false)
-  const [notionError, setNotionError]   = useState("")
+  const [status, setStatus]               = useState<IntegrationStatus | null>(null)
+  const [loading, setLoading]             = useState(true)
+  const [notionToken, setNotionToken]     = useState("")
+  const [notionPage, setNotionPage]       = useState("")
+  const [savingNotion, setSavingNotion]   = useState(false)
+  const [notionError, setNotionError]     = useState("")
   const [notionSuccess, setNotionSuccess] = useState(false)
 
   const connected = searchParams.get("connected")
@@ -75,7 +81,6 @@ export default function IntegrationsPage() {
     if (res.ok && data.ok) {
       setNotionSuccess(true)
       setNotionToken("")
-      // Refresh status
       fetch("/api/integrations/status").then((r) => r.json()).then(setStatus)
     } else {
       setNotionError(data.error ?? "Failed to save token")
@@ -98,10 +103,17 @@ export default function IntegrationsPage() {
   return (
     <div className="max-w-2xl mx-auto px-6 py-12 space-y-6">
       <div className="my-20">
-              <Navbar />
+        <Navbar />
       </div>
 
       <div>
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeftCircle className="h-5 w-5" /> Back to Results
+        </button>
         <h1 className="text-2xl font-bold">Integrations</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Connect your tools so Minutely can send follow-ups, book meetings, and sync notes automatically.
@@ -305,5 +317,21 @@ export default function IntegrationsPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+// ── Page export — wraps the content in Suspense for useSearchParams ────────────
+
+export default function IntegrationsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <IntegrationsContent />
+    </Suspense>
   )
 }

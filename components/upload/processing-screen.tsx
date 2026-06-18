@@ -3,379 +3,311 @@
 import { useEffect, useRef, useState } from "react"
 import { motion } from "framer-motion"
 import {
-  BrainCircuit,
-  CheckCircle2,
-  Clock3,
+  Brain,
+  ListChecks,
+  AlertTriangle,
   GitBranch,
   Network,
-  Sparkles,
-  Users,
-  Zap,
+  Send,
+  CheckCircle2,
+  XCircle,
+  RotateCcw,
 } from "lucide-react"
 
 import type { MeetingIntelligence } from "@/types/analysis"
 
 const steps = [
   {
-    icon: BrainCircuit,
-    title: "Reading transcript",
-    description: "Understanding context and structure",
-    status: "Parsing conversation flow",
+    icon: Brain,
+    name: "Parsing transcript",
+    desc: "Reading context, speakers, and structure",
+    phase: "serial" as const,
   },
   {
-    icon: Users,
-    title: "Identifying speakers & tasks",
-    description: "Mapping participants, roles, and commitments",
-    status: "Detecting ownership",
+    icon: ListChecks,
+    name: "Extracting tasks & owners",
+    desc: "Mapping commitments to participants",
+    phase: "parallel" as const,
   },
   {
-    icon: Zap,
-    title: "Detecting blockers",
-    description: "Surfacing risks and dependencies",
-    status: "Analyzing bottlenecks",
+    icon: AlertTriangle,
+    name: "Detecting blockers",
+    desc: "Surfacing risks and dependencies",
+    phase: "parallel" as const,
   },
   {
     icon: GitBranch,
-    title: "Planning sprints",
-    description: "Scheduling tasks by priority and capacity",
-    status: "Building execution roadmap",
+    name: "Planning sprints",
+    desc: "Scheduling by priority and capacity",
+    phase: "parallel" as const,
   },
   {
     icon: Network,
-    title: "Building workflow",
-    description: "Generating execution DAG",
-    status: "Linking dependencies",
+    name: "Building workflow DAG",
+    desc: "Linking task dependencies",
+    phase: "parallel" as const,
   },
   {
-    icon: Clock3,
-    title: "Drafting follow-ups",
-    description: "Preparing per-person action messages",
-    status: "Finalizing outputs",
+    icon: Send,
+    name: "Drafting follow-ups",
+    desc: "Per-person action messages",
+    phase: "parallel" as const,
   },
 ]
+
+// Step 0 is the serial analysis agent (~3-4s).
+// Steps 1-5 run in parallel immediately after.
+const STEP_DELAYS_MS = [0, 3200, 3600, 4000, 4400, 4800]
 
 interface Props {
   transcript: string
   onComplete: (data: MeetingIntelligence) => void
+  onRetry: () => void
 }
 
-export default function ProcessingScreen({
-  transcript,
-  onComplete,
-}: Props) {
+export default function ProcessingScreen({ transcript, onComplete, onRetry }: Props) {
   const hasFired = useRef(false)
-
-  const [activeStep, setActiveStep] = useState(0)
+  const [activeStep, setActiveStep] = useState(-1)
+  const [doneSteps, setDoneSteps] = useState<Set<number>>(new Set())
   const [elapsed, setElapsed] = useState(0)
+  const [apiDone, setApiDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const pendingResult = useRef<MeetingIntelligence | null>(null)
 
   // Timer
   useEffect(() => {
-    const timer = setInterval(() => {
-      setElapsed((e) => e + 1)
-    }, 1000)
-
-    return () => clearInterval(timer)
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000)
+    return () => clearInterval(id)
   }, [])
 
-  // Step animation
+  // Step animation — advances independently of API, reflects actual pipeline shape
   useEffect(() => {
-    if (activeStep >= steps.length - 1) return
+    const timers: ReturnType<typeof setTimeout>[] = []
+    STEP_DELAYS_MS.forEach((delay, i) => {
+      timers.push(
+        setTimeout(() => {
+          setActiveStep(i)
+          if (i > 0) setDoneSteps((prev) => new Set([...prev, i - 1]))
+        }, delay)
+      )
+    })
+    return () => timers.forEach(clearTimeout)
+  }, [])
 
+  // When API finishes successfully, mark all done then hand off
+  useEffect(() => {
+    if (!apiDone || error) return
+    setDoneSteps(new Set(steps.map((_, i) => i)))
+    setActiveStep(-1)
     const t = setTimeout(() => {
-      setActiveStep((s) => s + 1)
-    }, 1800)
-
+      if (pendingResult.current) onComplete(pendingResult.current)
+    }, 600)
     return () => clearTimeout(t)
-  }, [activeStep])
+  }, [apiDone, error, onComplete])
 
-  // API call
+  // API call — fires exactly once
   useEffect(() => {
     if (hasFired.current) return
     hasFired.current = true
-
-    const start = Date.now()
 
     async function analyze() {
       try {
         const res = await fetch("/api/analyze", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ transcript }),
         })
 
         if (!res.ok) {
-          let detail = null
-
-          try {
-            detail = await res.json()
-          } catch {
-            detail = await res.text().catch(() => null)
-          }
-
-          console.error("API route failed:", detail)
-
+          let detail: { error?: string; details?: string } | null = null
+          try { detail = await res.json() } catch { /* ignore */ }
           throw new Error(
-            detail?.error ||
-              detail?.details ||
-              "Analysis failed"
+            detail?.error || detail?.details || `Server error ${res.status}`
           )
         }
 
         const data: MeetingIntelligence = await res.json()
-
-        onComplete(data)
+        pendingResult.current = data
+        setApiDone(true)
       } catch (err) {
-        console.error("Processing error:", err)
-
-        onComplete(
-          getFallback(
-            transcript,
-            Date.now() - start
-          )
-        )
+        console.error("[ProcessingScreen] analysis failed:", err)
+        setError(err instanceof Error ? err.message : "Analysis failed. Please try again.")
+        setApiDone(true)
       }
     }
 
     analyze()
-  }, [transcript, onComplete])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcript])
 
-  const progress =
-    ((activeStep + 1) / steps.length) * 100
+  const progress = apiDone && !error
+    ? 100
+    : Math.round(((doneSteps.size + (activeStep >= 0 ? 0.5 : 0)) / steps.length) * 100)
 
+  const footerStatus = error
+    ? "Analysis failed"
+    : apiDone
+    ? "All agents complete"
+    : activeStep >= 0
+    ? `${steps[activeStep].name}…`
+    : "Starting…"
+
+  // ── Error state ─────────────────────────────────────────────────────────────
+  if (error) {
     return (
-      <div className="relative mx-auto flex h-[calc(100vh-140px)] max-w-5xl flex-col overflow-hidden rounded-[2rem] border border-border/40 bg-card/40 px-8 py-6 shadow-2xl backdrop-blur-2xl">
-    
-        {/* Ambient Background */}
-        <div className="absolute inset-0 -z-20 overflow-hidden">
-          <div className="absolute left-1/2 top-0 h-64 w-64 -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
-    
-          <div className="absolute bottom-0 right-0 h-52 w-52 rounded-full bg-primary/5 blur-[100px]" />
+      <div className="mx-auto max-w-xl px-4 py-16 text-center">
+        <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-2xl border border-destructive/20 bg-destructive/5">
+          <XCircle className="h-5 w-5 text-destructive" />
         </div>
-    
-        {/* Grid */}
-        <div className="bg-grid absolute inset-0 -z-10 opacity-[0.04]" />
-    
-        {/* Header */}
-        <div className="shrink-0 text-center">
-    
-          {/* Orb */}
-          <motion.div
-            animate={{
-              scale: [1, 1.05, 1],
-            }}
-            transition={{
-              duration: 3,
-              repeat: Infinity,
-            }}
-            className="relative mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-background/70 shadow-xl backdrop-blur-xl"
-          >
-            <div className="absolute inset-0 rounded-2xl bg-primary/10 blur-xl" />
-    
-            <Sparkles className="relative h-7 w-7 text-primary" />
-    
-            <span className="absolute inset-0 animate-ping rounded-2xl border border-primary/20" />
-          </motion.div>
-    
-          {/* Badge */}
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-background/60 px-4 py-2 text-xs text-muted-foreground backdrop-blur-xl">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-    
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-            </span>
-    
-            Autonomous multi-agent system active
-          </div>
-    
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">
-            Processing meeting intelligence
-          </h2>
-    
-          <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Extracting tasks, detecting blockers, building workflows,
-            generating sprint plans, and preparing follow-ups.
-          </p>
-        </div>
-    
-        {/* Progress */}
-        <div className="mt-6 shrink-0">
-    
-          <div className="mb-2 flex items-center justify-between text-xs">
-            <span className="font-medium text-muted-foreground">
-              AI Processing
-            </span>
-    
-            <span className="text-muted-foreground">
-              {Math.round(progress)}%
-            </span>
-          </div>
-    
-          <div className="h-2 overflow-hidden rounded-full bg-muted/60">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{
-                width: `${progress}%`,
-              }}
-              transition={{
-                duration: 0.5,
-              }}
-              className="relative h-full rounded-full bg-primary"
-            >
-              <div className="absolute inset-0 bg-white/10" />
-            </motion.div>
-          </div>
-        </div>
-    
-        {/* Steps */}
-        <div className="mt-8 flex-1 overflow-hidden">
-    
-          <div className="grid gap-3 md:grid-cols-2">
-    
-            {steps.map((step, index) => {
-              const isDone = index < activeStep
-              const isActive = index === activeStep
-              const isPending = index > activeStep
-    
-              return (
-                <motion.div
-                  key={step.title}
-                  initial={{
-                    opacity: 0,
-                    y: 10,
-                  }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                  }}
-                  transition={{
-                    delay: index * 0.05,
-                  }}
-                  className={`relative overflow-hidden rounded-2xl px-4 py-3 transition-all duration-500 ${
-                    isActive
-                      ? "bg-primary/5 ring-1 ring-primary/20"
-                      : isDone
-                      ? "bg-muted/30"
-                      : "bg-muted/15"
-                  }`}
-                >
-    
-                  {/* Active glow */}
-                  {isActive && (
-                    <div className="absolute inset-0 bg-linear-to-r from-primary/5 via-transparent to-primary/5" />
-                  )}
-    
-                  <div className="relative flex items-start gap-3">
-    
-                    {/* Icon */}
-                    <div
-                      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                        isDone
-                          ? "bg-primary/15"
-                          : isActive
-                          ? "bg-primary/10"
-                          : "bg-muted/40"
-                      }`}
-                    >
-                      {isDone ? (
-                        <CheckCircle2 className="h-4 w-4 text-primary" />
-                      ) : (
-                        <step.icon
-                          className={`h-4 w-4 ${
-                            isActive
-                              ? "text-primary"
-                              : "text-muted-foreground"
-                          }`}
-                        />
-                      )}
-    
-                      {isActive && (
-                        <span className="absolute inset-0 animate-ping rounded-xl bg-primary/10" />
-                      )}
-                    </div>
-    
-                    {/* Content */}
-                    <div className="min-w-0 flex-1">
-    
-                      <div className="flex items-center justify-between gap-3">
-    
-                        <div className="min-w-0">
-                          <h3
-                            className={`truncate text-sm font-medium ${
-                              isPending
-                                ? "text-muted-foreground"
-                                : "text-foreground"
-                            }`}
-                          >
-                            {step.title}
-                          </h3>
-    
-                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                            {step.description}
-                          </p>
-                        </div>
-    
-                        {/* Status */}
-                        <div className="shrink-0">
-    
-                          {isDone && (
-                            <div className="rounded-full bg-primary/10 px-2 py-1 text-[10px] text-primary">
-                              Done
-                            </div>
-                          )}
-    
-                          {isActive && (
-                            <div className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-[10px] text-primary">
-                              <span className="h-1 w-1 animate-bounce rounded-full bg-primary" />
-    
-                              <span className="h-1 w-1 animate-bounce rounded-full bg-primary [animation-delay:0.15s]" />
-    
-                              <span className="h-1 w-1 animate-bounce rounded-full bg-primary [animation-delay:0.3s]" />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-    
-                      {/* Live status */}
-                      {isActive && (
-                        <motion.div
-                          initial={{
-                            opacity: 0,
-                            y: 4,
-                          }}
-                          animate={{
-                            opacity: 1,
-                            y: 0,
-                          }}
-                          className="mt-3 rounded-xl bg-background/50 px-3 py-2 text-[11px] text-muted-foreground"
-                        >
-                          {step.status}
-                        </motion.div>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              )
-            })}
-          </div>
-        </div>
-    
-        {/* Bottom Bar */}
-        <div className="mt-6 flex shrink-0 items-center justify-between border-t border-border/40 pt-4 text-xs text-muted-foreground">
-    
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-    
-            <span>
-              AI agents collaborating in real time
-            </span>
-          </div>
-    
-          <div className="rounded-full bg-background/60 px-3 py-1 tabular-nums">
-            {elapsed}s
-          </div>
-        </div>
+
+        <h2 className="text-lg font-medium tracking-tight">Analysis failed</h2>
+
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+          {error}
+        </p>
+
+        <p className="mt-1 text-xs text-muted-foreground/60">
+          Elapsed: {elapsed}s
+        </p>
+
+        <button
+          onClick={onRetry}
+          className="mx-auto mt-6 flex items-center gap-2 rounded-lg border border-border/60 bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <RotateCcw className="h-4 w-4" />
+          Try again
+        </button>
       </div>
     )
   }
+
+  // ── Processing state ─────────────────────────────────────────────────────────
+  return (
+    <div className="mx-auto max-w-xl px-4 py-10">
+      {/* Header */}
+      <div className="mb-8 text-center">
+        <motion.div
+          animate={{ scale: [1, 1.04, 1] }}
+          transition={{ duration: 2.5, repeat: Infinity }}
+          className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border/40 bg-card shadow-sm"
+        >
+          <Brain className="h-5 w-5 text-foreground/70" />
+        </motion.div>
+
+        <h2 className="text-xl font-medium tracking-tight">
+          Processing meeting intelligence
+        </h2>
+
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+          6 AI agents running in parallel — extracting tasks, blockers, sprints, and follow-ups.
+        </p>
+      </div>
+
+      {/* Progress bar */}
+      <div className="mb-6">
+        <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+          <span>Progress</span>
+          <span className="tabular-nums">{progress}%</span>
+        </div>
+        <div className="h-[3px] overflow-hidden rounded-full bg-muted/60">
+          <motion.div
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="h-full rounded-full bg-foreground/80"
+          />
+        </div>
+      </div>
+
+      {/* Steps */}
+      <div className="mb-6 flex flex-col gap-1">
+        {steps.map((step, i) => {
+          const isDone = doneSteps.has(i)
+          const isActive = activeStep === i && !isDone
+          const isPending = !isDone && !isActive
+
+          return (
+            <motion.div
+              key={step.name}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.04 }}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-300 ${
+                isActive
+                  ? "bg-muted/60 ring-1 ring-border/60"
+                  : isDone
+                  ? "bg-muted/30"
+                  : "bg-transparent"
+              }`}
+            >
+              {/* Icon */}
+              <div
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors duration-300 ${
+                  isDone
+                    ? "border-border/40 bg-card"
+                    : isActive
+                    ? "border-border/60 bg-card"
+                    : "border-border/20 bg-transparent"
+                }`}
+              >
+                {isDone ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-foreground/70" />
+                ) : (
+                  <step.icon
+                    className={`h-3.5 w-3.5 ${
+                      isActive ? "text-foreground/80" : "text-muted-foreground/40"
+                    }`}
+                  />
+                )}
+              </div>
+
+              {/* Text */}
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`text-sm font-medium leading-none ${
+                    isPending ? "text-muted-foreground/50" : "text-foreground"
+                  }`}
+                >
+                  {step.name}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground/60">{step.desc}</p>
+              </div>
+
+              {/* Badge */}
+              <div className="shrink-0">
+                {isDone && (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                    done
+                  </span>
+                )}
+                {isActive && (
+                  <span className="flex items-center gap-0.5">
+                    {[0, 1, 2].map((d) => (
+                      <span
+                        key={d}
+                        className="h-1 w-1 animate-bounce rounded-full bg-foreground/50"
+                        style={{ animationDelay: `${d * 0.15}s` }}
+                      />
+                    ))}
+                  </span>
+                )}
+              </div>
+            </motion.div>
+          )
+        })}
+      </div>
+
+      <p className="mb-6 text-center text-xs text-muted-foreground/60">
+        Agents 2–6 run in parallel after the initial parse
+      </p>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between border-t border-border/30 pt-4 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+          <span>{footerStatus}</span>
+        </div>
+        <span className="tabular-nums">{elapsed}s</span>
+      </div>
+    </div>
+  )
+}
