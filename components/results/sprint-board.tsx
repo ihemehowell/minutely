@@ -1,7 +1,18 @@
 "use client"
 
 import { useState } from "react"
-import { GitBranch, ChevronDown, ChevronUp, Circle, CheckCircle2, Clock3, AlertCircle } from "lucide-react"
+import {
+  GitBranch,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  CheckCircle2,
+  Clock3,
+  AlertCircle,
+  User,
+  CalendarDays,
+  Flag,
+} from "lucide-react"
 import type { SprintItem, ActionItem, WorkflowStatus } from "@/types/analysis"
 
 interface Props {
@@ -26,10 +37,13 @@ export default function SprintBoard({ sprintPlan, actionItems }: Props) {
   const [expanded, setExpanded] = useState<string | null>(
     sprintPlan[0]?.id ?? null
   )
+const [selectedTask, setSelectedTask] = useState<string | null>(null)
 
   if (!sprintPlan.length) return null
 
   const itemById = Object.fromEntries(actionItems.map((a) => [a.id, a]))
+
+  
 
   const totalPoints = (sprint: SprintItem) =>
     sprint.tasks
@@ -146,22 +160,140 @@ export default function SprintBoard({ sprintPlan, actionItems }: Props) {
                           const { icon: Icon, className } = statusConfig[st] ?? statusConfig.ready
                           const pts = item.storyPoints ?? 3
                           return (
-                            <div
-                              key={item.id}
-                              className="flex items-center gap-3 rounded-xl bg-muted/30 px-3 py-2.5"
-                            >
-                              <Icon className={`h-3.5 w-3.5 shrink-0 ${className}`} />
-                              <span className="flex-1 min-w-0 text-sm truncate">
-                                {item.task}
-                              </span>
-                              <span className="shrink-0 text-xs text-muted-foreground">
+                   <div
+                    key={item.id}
+                    className="space-y-2 transition-all duration-200"
+                  >
+                      <button
+                        onClick={() =>
+                          setSelectedTask(
+                            selectedTask === item.id ? null : item.id
+                          )
+                        }
+                        className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 transition-all ${
+                        selectedTask === item.id
+                          ? "border-primary bg-primary/5 shadow-sm"
+                          : "border-transparent bg-muted/30 hover:border-primary/20 hover:bg-primary/5"
+                      }`}
+                      >
+                        <Icon className={`h-3.5 w-3.5 shrink-0 ${className}`} />
+
+                        <span className="flex-1 min-w-0 text-left text-sm font-medium truncate">
+                          {item.task}
+                        </span>
+
+                        <span className="text-xs text-muted-foreground">
+                          {item.assignee}
+                        </span>
+
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${pointsColor(
+                            pts
+                          )}`}
+                        >
+                          {pts}pt
+                        </span>
+
+                        {selectedTask === item.id ? (
+                          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </button>
+
+                      {selectedTask === item.id && (
+                      <div className="ml-20 rounded-2xl border bg-background/80 p-5 animate-in fade-in-0 slide-in-from-top-2 duration-1000">
+                        <div className="flex  items-center gap-2 text-sm justify-between">
+
+                          <div className="space-y-3 flex flex-col gap-4 items-start">
+
+                            <div className="flex items-center gap-2 text-sm">
+                              <User className="h-4 w-4 text-primary" />
+                              <span className="font-medium">Assignee</span>
+                              <span className="text-muted-foreground">
                                 {item.assignee}
                               </span>
-                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${pointsColor(pts)}`}>
-                                {pts}pt
+                            </div>
+
+                            <div className="flex items-center gap-2 text-sm">
+                              <CalendarDays className="h-4 w-4 text-primary" />
+                              <span className="font-medium">Due</span>
+                              <span className="text-muted-foreground">
+                                {item.due}
                               </span>
                             </div>
-                          )
+
+                            <div className="flex items-center gap-2 text-sm">
+                              <Flag className="h-4 w-4 text-primary" />
+                              <span className="font-medium">Priority</span>
+
+                              <span
+                                className={`rounded-full px-2 py-1 text-xs ${
+                                  item.priority === "high"
+                                    ? "bg-red-500/10 text-red-500"
+                                    : item.priority === "medium"
+                                    ? "bg-yellow-500/10 text-yellow-500"
+                                    : "bg-green-500/10 text-green-500"
+                                }`}
+                              >
+                                {item.priority}
+                              </span>
+                            </div>
+
+                          </div>
+
+                          <div className="space-y-3 flex flex-col  gap-4 items-start">
+
+                            <div>
+                              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Status
+                              </p>
+
+                              <div className="inline-flex items-center gap-2 rounded-xl bg-primary/5 px-3 py-2 text-sm">
+                                <Icon className={`h-4 w-4 ${className}`} />
+                                {statusConfig[st].label}
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Story Points
+                              </p>
+
+                              <div className="flex items-center gap-2">
+
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                      statusConfig[st].className === "text-red-500"
+                                        ? "bg-red-500/10 text-red-500"
+                                        : statusConfig[st].className === "text-yellow-500"
+                                        ? "bg-yellow-500/10 text-yellow-500"
+                                        : statusConfig[st].className === "text-blue-500"
+                                        ? "bg-blue-500/10 text-blue-500"
+                                        : "bg-green-500/10 text-green-500"
+                                    }`}
+                                  >
+                                    {statusConfig[st].label}
+                                  </span>
+
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${pointsColor(
+                                      pts
+                                    )}`}
+                                  >
+                                    {pts}pt
+                                  </span>
+
+                                </div>
+                            </div>
+
+                          </div>
+
+                        </div>
+                      </div>
+                    )}
+                    </div>
+                  )
                         })
                       )}
                     </div>

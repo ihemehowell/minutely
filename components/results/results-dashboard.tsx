@@ -46,6 +46,7 @@ type TabKey =
   | "Follow-ups"
   | "Runtime"
   | "Decisions"
+  | "Participants"
   | "Transcript"
 
 /** Total number of agents RuntimeTab will render — keeps the badge in sync. */
@@ -102,6 +103,7 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
     { key: "Workflow",     label: "Workflow",     visible: hasWorkflow,    count: intel?.workflow?.length },
     { key: "Follow-ups",   label: "Follow-ups",   visible: hasFollowUps,   count: intel?.followUps?.length },
     { key: "Runtime",      label: "Runtime",      visible: true,           count: AGENT_COUNT },
+    {key: "Participants",label: "Participants",visible: participants.length > 0,count: participants.length,},
     { key: "Decisions",    label: "Decisions",    visible: decisions.length > 0, count: decisions.length },
     { key: "Transcript",   label: "Transcript",   visible: true },
   ]
@@ -179,6 +181,25 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
           <FollowUpsPanel followUps={intel.followUps} meetingTitle={title} />
         ) : (
           <EmptyState message="Follow-ups not available." />
+        )
+
+        case "Participants":
+        return participants.length === 0 ? (
+          <EmptyState message="No participants detected." />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {participants.map((person, index) => (
+              <div
+                key={index}
+                className=" flex justify-between items-center rounded-2xl border border-white/10 bg-background/70 p-4"
+              >
+                <p className="font-semibold text-base">{person.name}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {person.role}
+                </p>
+              </div>
+            ))}
+          </div>
         )
 
       case "Decisions":
@@ -292,18 +313,30 @@ export default function ResultsDashboard({ analysis: initial, meetingId }: Props
             </div>
 
             {/* Tabs */}
-            <nav className="flex gap-1.5 overflow-x-auto rounded-2xl border border-white/10 bg-muted/30 p-1.5 backdrop-blur-xl scrollbar-none w-[890px]">
+            <nav className="flex w-full gap-1.5 overflow-x-auto rounded-2xl border border-white/10 bg-muted/30 p-1.5 backdrop-blur-xl scrollbar-none">
               {visibleTabs.map((tab) => (
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`shrink-0 rounded-xl px-3 py-2 text-xs font-medium whitespace-nowrap ${
+                  className={`shrink-0 flex items-center rounded-xl px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors ${
                     currentTab === tab.key
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {tab.label}
+                  <span>{tab.label}</span>
+
+                  {typeof tab.count === "number" && (
+                    <span
+                      className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        currentTab === tab.key
+                          ? "bg-primary-foreground/20 text-primary-foreground"
+                          : "bg-primary/10 text-primary"
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>

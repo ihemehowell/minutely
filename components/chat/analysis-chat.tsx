@@ -75,7 +75,7 @@ export default function AnalysisChat({
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
 
   // Keep a ref to the latest analysis so send() always uses current data
   // even after onPatch has updated the parent state
@@ -85,9 +85,10 @@ export default function AnalysisChat({
   }, [analysis])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
-
+  if (messagesRef.current) {
+    messagesRef.current.scrollTop = messagesRef.current.scrollHeight
+  }
+}, [messages])
   const persistPatch = useCallback(
     async (patch: Partial<MeetingIntelligence>): Promise<boolean> => {
       if (!meetingId) return false
@@ -206,7 +207,10 @@ export default function AnalysisChat({
       )}
 
       {/* Messages — min-h-0 is required so this scrolls instead of pushing the input bar off-screen */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
+      <div
+        ref={messagesRef}
+        className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3"
+      >
         {messages.length === 0 && (
           <div className="pt-2 space-y-2">
             <p className="text-xs text-muted-foreground px-1">Try asking:</p>
@@ -283,7 +287,7 @@ export default function AnalysisChat({
           </div>
         )}
 
-        <div ref={bottomRef} />
+        
       </div>
 
       {/* Input — shrink-0 + safe-area padding keeps it pinned and tappable above iOS home indicator */}
